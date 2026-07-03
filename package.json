@@ -1,0 +1,11 @@
+{
+  "name": "gha-lab",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node index.js"
+  },
+  "dependencies": {
+    "cowsay": "^1.6.0"
+  }
+}
