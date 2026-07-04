@@ -1,0 +1,45 @@
+name: ec2-credit
+on: [workflow_dispatch]
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  ec2-credit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: AWS creds (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Find latest AL2023 AMI
+        id: ami
+        run: |
+          AMI=$(aws ec2 describe-images \
+            --owners amazon \
+            --filters "Name=name,Values=al2023-ami-*-x86_64" "Name=state,Values=available" \
+            --query 'reverse(sort_by(Images,&CreationDate))[0].ImageId' \
+            --output text)
+          echo "id=$AMI" >> "$GITHUB_OUTPUT"
+          echo "AMI: $AMI"
+
+      - name: Launch t3.micro
+        id: run
+        run: |
+          IID=$(aws ec2 run-instances \
+            --image-id ${{ steps.ami.outputs.id }} \
+            --instance-type t3.micro --count 1 \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=free-tier-credit}]' \
+            --query 'Instances[0].InstanceId' --output text)
+          echo "id=$IID" >> "$GITHUB_OUTPUT"
+          echo "Launched: $IID"
+          aws ec2 wait instance-running --instance-ids "$IID"
+          echo "Running."
+
+      - name: Terminate
+        if: always() && steps.run.outputs.id != ''
+        run: |
+          aws ec2 terminate-instances --instance-ids ${{ steps.run.outputs.id }}
+          aws ec2 wait instance-terminated --instance-ids ${{ steps.run.outputs.id }}
+          echo "Terminated: ${{ steps.run.outputs.id }}"
