@@ -1,0 +1,54 @@
+name: lambda-lab
+on: [workflow_dispatch]
+permissions:
+  id-token: write
+  contents: read
+env:
+  FN: lambda-lab-fn
+  EXEC_ROLE_ARN: arn:aws:iam::399894608381:role/lambda-lab-exec
+jobs:
+  lambda:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: AWS creds (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Package
+        run: cd lambda && zip ../function.zip lambda_function.py
+
+      - name: Create function
+        run: |
+          aws lambda create-function \
+            --function-name "$FN" \
+            --runtime python3.12 \
+            --role "$EXEC_ROLE_ARN" \
+            --handler lambda_function.lambda_handler \
+            --zip-file fileb://function.zip \
+            --timeout 10
+          aws lambda wait function-active-v2 --function-name "$FN"
+          echo "Function active."
+
+      - name: Invoke
+        run: |
+          aws lambda invoke --function-name "$FN" \
+            --payload '{"name":"Aleksandr"}' \
+            --cli-binary-format raw-in-base64-out \
+            out.json
+          echo "--- response ---"; cat out.json; echo
+
+      - name: Show logs
+        run: |
+          sleep 8
+          aws logs tail "/aws/lambda/$FN" --since 5m --format short || echo "logs not ready"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          aws lambda delete-function --function-name "$FN" || true
+          aws logs delete-log-group --log-group-name "/aws/lambda/$FN" || true
+          echo "Deleted function + log group."
